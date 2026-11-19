@@ -1,0 +1,36 @@
+name: Build Windows plugin
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download OpenCV (prebuilt)
+        shell: pwsh
+        run: |
+          curl.exe -L --fail -o opencv.exe https://github.com/opencv/opencv/releases/download/4.10.0/opencv-4.10.0-windows.exe
+          .\opencv.exe -oC:\ -y | Out-Null
+          Get-ChildItem C:\opencv\build\x64\vc16\bin
+
+      - name: Configure
+        shell: pwsh
+        run: cmake --preset windows-x64 -DOpenCV_DIR=C:/opencv/build
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build --preset windows-x64 --config Release --parallel
+
+      - name: Install
+        shell: pwsh
+        run: cmake --install build_x64 --prefix "${{ github.workspace }}/release" --config Release
+
+      - name: Upload plugin
+        uses: actions/upload-artifact@v4
+        with:
+          name: obs-face-censor-windows
+          path: release/
