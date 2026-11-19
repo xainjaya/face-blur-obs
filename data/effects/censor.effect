@@ -1,0 +1,119 @@
+uniform float4x4 ViewProj;
+uniform texture2d image;
+
+uniform float4 face0; // each face: x, y, w, h in 0..1 UV space
+uniform float4 face1;
+uniform float4 face2;
+uniform float4 face3;
+uniform float4 face4;
+uniform float4 face5;
+uniform float4 face6;
+uniform float4 face7;
+uniform int count;
+uniform int mode;        // 0 blur, 1 black, 2 static, 3 pixelate
+uniform int ellipse;
+uniform float radius;
+uniform float pixel_size;
+uniform float t;
+uniform float2 texel;
+
+sampler_state tex {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v)
+{
+	VertData o;
+	o.pos = mul(float4(v.pos.xyz, 1.0), ViewProj);
+	o.uv  = v.uv;
+	return o;
+}
+
+float hash(float2 p)
+{
+	return frac(sin(dot(p, float2(12.9898, 78.233))) * 43758.5453);
+}
+
+float4 get_face(int i)
+{
+	if (i == 0) return face0;
+	if (i == 1) return face1;
+	if (i == 2) return face2;
+	if (i == 3) return face3;
+	if (i == 4) return face4;
+	if (i == 5) return face5;
+	if (i == 6) return face6;
+	return face7;
+}
+
+bool covered(float2 uv)
+{
+	bool hit = false;
+	for (int i = 0; i < 8; i++) {
+		if (i < count) {
+			float4 r = get_face(i);
+			if (ellipse != 0) {
+				float2 c = r.xy + r.zw * 0.5;
+				float2 d = (uv - c) / (r.zw * 0.5);
+				if (dot(d, d) <= 1.0)
+					hit = true;
+			} else {
+				if (uv.x >= r.x && uv.x <= r.x + r.z && uv.y >= r.y && uv.y <= r.y + r.w)
+					hit = true;
+			}
+		}
+	}
+	return hit;
+}
+
+float4 PSMain(VertData v) : TARGET
+{
+	float4 c = image.SampleLevel(tex, v.uv, 0);
+	if (!covered(v.uv))
+		return c;
+
+	if (mode == 1)
+		return float4(0.0, 0.0, 0.0, 1.0);
+
+	if (mode == 2) {
+		float2 cell = floor(v.uv / (texel * 3.0));
+		float n = hash(cell + floor(t * 30.0));
+		return float4(n, n, n, 1.0);
+	}
+
+	if (mode == 3) {
+		float2 block = texel * pixel_size;
+		float2 uv2 = (floor(v.uv / block) + 0.5) * block;
+		return image.SampleLevel(tex, uv2, 0);
+	}
+
+	// blur: 7x7 gaussian-weighted taps spread by 'radius' pixels
+	float4 acc = float4(0.0, 0.0, 0.0, 0.0);
+	float wsum = 0.0;
+	for (int x = -3; x <= 3; x++) {
+		for (int y = -3; y <= 3; y++) {
+			float fx = (float)x;
+			float fy = (float)y;
+			float w = exp(-(fx * fx + fy * fy) / 8.0);
+			acc += image.SampleLevel(tex, v.uv + float2(x, y) * texel * radius, 0) * w;
+			wsum += w;
+		}
+	}
+	return acc / wsum;
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v);
+		pixel_shader  = PSMain(v);
+	}
+}
